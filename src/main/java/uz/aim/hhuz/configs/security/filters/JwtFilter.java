@@ -1,0 +1,70 @@
+package uz.aim.hhuz.configs.security.filters;
+
+import uz.aim.hhuz.service.auth.UserService;
+import uz.aim.hhuz.service.token.AccessTokenService;
+import uz.aim.hhuz.utils.jwt.JwtUtils;
+import lombok.RequiredArgsConstructor;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
+import org.springframework.util.StringUtils;
+import org.springframework.web.filter.OncePerRequestFilter;
+
+import javax.servlet.FilterChain;
+import javax.servlet.ServletException;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+import java.io.IOException;
+import java.util.List;
+import java.util.function.Function;
+
+@RequiredArgsConstructor
+public class JwtFilter extends OncePerRequestFilter {
+
+    // TODO: 10/24/22 Mac address orqali verify qilish kerak 
+    // TODO: 10/24/22 Unique Serial number qo'shib berish kerak  
+    private final UserService userService;
+    private final static List<String> WHITE_LIST = List.of(
+            "/auth/login",
+            "/auth/register",
+            "/swagger-ui",
+            "/auth/checkOTP",
+            "/v3/api-docs"
+    );
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain) throws ServletException, IOException {
+        String requestURI = request.getRequestURI();
+        if (!isOpenUrl.apply(requestURI)) {
+            try {
+                String token = parseJwt(request);
+                final AccessTokenService accessTokenService = JwtUtils.accessTokenService;
+                if (accessTokenService.isValid(token)) {
+                    String email = accessTokenService.getSubject(token);
+                    UserDetails userDetails = userService.loadUserByUsername(email);
+                    UsernamePasswordAuthenticationToken authenticationToken = new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
+                    authenticationToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                    SecurityContextHolder.getContext().setAuthentication(authenticationToken);
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+        filterChain.doFilter(request, response);
+
+    }
+
+    private String parseJwt(HttpServletRequest request) {
+        String headerAuth = request.getHeader("Authorization");
+        String prefix = "Bearer ";
+        if (StringUtils.hasText(headerAuth) && headerAuth.startsWith(prefix)) {
+            return headerAuth.substring(prefix.length());
+        }
+        return null;
+    }
+
+    private final static Function<String, Boolean> isOpenUrl = (url) -> WHITE_LIST.stream().anyMatch(url::startsWith);
+    ;
+
+}
